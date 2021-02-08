@@ -134,10 +134,10 @@ impl HashTree {
             let merged_hash = format!("{:?}{:?}", n1.hash(), n2.hash());
             println!("merged hash: {:?}", merged_hash);
 
-            let new_hash = md5::compute(merged_hash.as_bytes());
-            println!("new hash: {:?}", new_hash);
+            let parent_hash = md5::compute(merged_hash.as_bytes());
+            println!("parent hash: {:?}", parent_hash);
 
-            let mut parent = Box::new(HashTreeNode::new(0, new_hash));
+            let mut parent = Box::new(HashTreeNode::new(0, parent_hash));
             parent.left = Some(n1);
             parent.right = Some(n2);
 
