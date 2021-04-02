@@ -140,6 +140,7 @@ impl HashTree {
     fn build(&mut self, mut nodes: VecDeque::<Box<HashTreeNode>>) {
         let nodes_to_process = nodes.len();
         if nodes_to_process == 1 {
+            self.root = nodes.pop_front();
             return;
         }
 
