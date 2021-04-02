@@ -6,7 +6,7 @@ mod test {
 
     #[test]
     fn is_empty_test() {
-        let my_tree = HashTree::new(); 
+        let my_tree = HashTree::new(0); 
         assert_eq!(my_tree.is_empty(), true);
     }
 
@@ -15,7 +15,7 @@ mod test {
         use std::path::PathBuf;
 
         let mut test_file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        test_file_path.push("target/debug/examples/lorem.txt");
+        test_file_path.push("examples/lorem.txt");
 
         match HashTree::from_file(test_file_path) {
             Ok(tree) => {
@@ -39,7 +39,7 @@ mod test {
         use std::path::PathBuf;
 
         let mut test_file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        test_file_path.push("target/debug/examples/8096.txt");
+        test_file_path.push("examples/8096.txt");
 
         match HashTree::from_file(test_file_path) {
             Ok(tree) => {
