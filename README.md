@@ -1,3 +1,3 @@
 # hashtree
 
-a hashtree (Merkle Tree) implementation in Rust
+A Merkle Tree implementation in Rust
