@@ -5,6 +5,7 @@ authors = ["sigrvn"]
 license = "MIT"
 edition = "2018"
 description = "A Merkle Tree implementation in Rust"
+repository = "https://github.com/sigrvn/hashtree"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
