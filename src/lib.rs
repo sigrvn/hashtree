@@ -161,11 +161,11 @@ where
             num_blocks: 0,
         };
 
-        hashtree.build(nodes, &strategy);
+        hashtree.build(nodes, strategy);
         Ok(hashtree)
     }
 
-    fn build<F>(&mut self, mut nodes: VecDeque::<NodePtr<T>>, strategy: &HashStrategy<T, F>)
+    fn build<F>(&mut self, mut nodes: VecDeque<NodePtr<T>>, strategy: HashStrategy<T, F>)
     where
         F: Fn(&[u8]) -> T 
     {
@@ -175,7 +175,6 @@ where
             return;
         }
 
-        let hs = strategy;
         let mut parents = VecDeque::<NodePtr<T>>::new();
         let mut processed = 0;
         while processed < nodes_to_process {
@@ -185,7 +184,7 @@ where
 
             let block_tag = format!("{} + {}", n1.block(), n2.block());
             let merged_hash = format!("{:?}{:?}", n1.hash(), n2.hash());
-            let parent_hash = (hs.hash_function)(merged_hash.as_bytes());
+            let parent_hash = (strategy.hash_function)(merged_hash.as_bytes());
             println!("hash for block {}: {:?}", block_tag, parent_hash);
 
             let mut parent = Box::new(HashTreeNode::new(block_tag, parent_hash));
@@ -201,23 +200,17 @@ where
     }
 
     pub fn root(&self) -> Option<&NodePtr<T>> {
-        match self.root {
-            Some(ref root) => {
-                Some(root) 
-            },
-            None => {
-                None
-            }
-        } 
+        if let Some(ref root) = self.root {
+            return Some(root)
+        }
+        None
     }
 
     pub fn find(&self, hash: T) -> Option<&NodePtr<T>> {
-        match self.root {
-            Some(ref root) => {
-                Some(root)
-            },
-            None => None
+        if let Some(ref root) = self.root {
+            return Some(root)
         }
+        None
     }
 
     pub fn nodes(&self) -> usize {
