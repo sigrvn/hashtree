@@ -75,7 +75,7 @@ where
 
 /// A struct that defines how the `HashTree` should partition and hash
 /// the blocks of data.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HashStrategy<T, F> 
 where
     T: Debug + Clone + PartialEq,
@@ -101,21 +101,53 @@ where
 }
 
 /// A Merkle-tree.
-#[derive(Clone)]
-pub struct HashTree<T> 
+#[derive(Debug, Clone)]
+pub struct HashTree<T, F> 
 where
     T: Debug + Clone + PartialEq,
+    F: Fn(&[u8]) -> T,
 {
     root: Option<NodePtr<T>>,
     num_nodes: usize,
     num_blocks: usize,
+    strategy: HashStrategy<T, F>,
 }
 
-impl<T> HashTree<T> 
+impl<T, F> HashTree<T, F> 
 where
     T: Debug + Clone + PartialEq,
+    F: Fn(&[u8]) -> T,
 {
-    /// Constructs a new `HashTree<T>` from a mutable object
+    /// Constructs a new empty `HashTree<T>` with a given
+    /// `HashStrategy<T, F>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![allow(dead_code)]
+    /// use hashtree::{HashTree, HashStrategy};
+    /// use md5::*;
+    ///
+    /// const BLOCK_SIZE: usize = 4096;
+    ///
+    /// fn main() {
+    ///     let tree = HashTree::new(
+    ///         HashStrategy::new(BLOCK_SIZE, |data| {
+    ///             md5::compute(data)
+    ///         })
+    ///     );
+    /// }
+    /// ```
+    pub fn new(strategy: HashStrategy<T, F>) -> Self {
+        Self {
+            root: None,
+            num_nodes: 0,
+            num_blocks: 0,
+            strategy,
+        }
+    }
+
+    /// Constructs a new `HashTree<T, F>` from a mutable object
     /// that implements the `Read` trait and a `HashStrategy<T, F>`.
     /// Returns an `Error` value if the function failed to read from
     /// the given object.
@@ -129,8 +161,8 @@ where
     ///
     /// fn main() {
     ///     let mut data = vec![0u8, 1u8];
-    ///     let tree = HashTree::new(
-    ///         &mut &data[..],
+    ///     let tree = HashTree::create(
+    ///         &mut data.as_slice(),
     ///         HashStrategy::new(1, |x| md5::compute(x))
     ///     );
     /// }
@@ -138,10 +170,9 @@ where
     /// The example above uses a `HashStrategy` that splits the data
     /// into 1-byte blocks and computes their MD5 digests for the
     /// `HashTree`.
-    pub fn new<R, F>(reader: &mut R, strategy: HashStrategy<T, F>) -> Result<Self>
+    pub fn create<R>(data: &mut R, strategy: HashStrategy<T, F>) -> Result<Self>
     where 
         R: Read,
-        F: Fn(&[u8]) -> T,
     {
         let mut buf = vec![0u8; strategy.block_size];
         let mut nodes = VecDeque::<NodePtr<T>>::new();
@@ -149,7 +180,7 @@ where
 
         let mut done = false;
         while !done {
-            let bytes_read = reader.read(&mut buf)?;
+            let bytes_read = data.read(&mut buf)?;
 
             if bytes_read < strategy.block_size {
                 done = true;
@@ -162,20 +193,18 @@ where
             block_num += 1; 
         }
 
-        let mut hashtree = HashTree::<T>{
+        let mut hashtree = HashTree::<T, F>{
             root: None,
             num_nodes: nodes.len(),
             num_blocks: block_num,
+            strategy,
         };
 
-        hashtree.build(nodes, strategy);
+        hashtree.build(nodes);
         Ok(hashtree)
     }
 
-    fn build<F>(&mut self, mut nodes: VecDeque<NodePtr<T>>, strategy: HashStrategy<T, F>)
-    where
-        F: Fn(&[u8]) -> T 
-    {
+    fn build(&mut self, mut nodes: VecDeque<NodePtr<T>>) {
         let nodes_to_process = nodes.len();
         if nodes_to_process == 1 {
             self.root = nodes.pop_front();
@@ -189,7 +218,7 @@ where
             let n2 = nodes.pop_front().unwrap_or(n1.clone());
 
             let merged_hash = format!("{:?}{:?}", n1.hash(), n2.hash());
-            let parent_hash = (strategy.hash_function)(merged_hash.as_bytes());
+            let parent_hash = (self.strategy.hash_function)(merged_hash.as_bytes());
 
             let mut parent = Box::new(HashTreeNode::new(parent_hash));
             parent.left = Some(n1);
@@ -200,7 +229,42 @@ where
             self.num_nodes += 1;
         }
 
-        return self.build(parents, strategy);
+        return self.build(parents);
+    }
+
+    /// 
+    pub fn insert<R>(&mut self, data: &mut R) 
+    where 
+        R: Read
+    {
+    }
+
+    /// Returns `true` if the `HashTree` is empty and `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![allow(dead_code)]
+    /// use hashtree::{HashTree, HashStrategy};
+    /// use md5::*;
+    /// 
+    /// const BLOCK_SIZE: usize = 4096;
+    ///
+    /// fn main() {
+    ///     let tree = HashTree::new(
+    ///         HashStrategy::new(BLOCK_SIZE, |data| {
+    ///             md5::compute(data)
+    ///         })
+    ///     );
+    ///
+    ///     assert_eq!(tree.is_empty(), true);
+    /// }
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        if let Some(_) = self.root {
+            return false
+        }
+        true
     }
 
     /// Returns the root of the `HashTree` as an `Option<&Box<HashTreeNode<T>>>`.
@@ -223,16 +287,16 @@ where
         self.num_nodes
     }
 
-    /// Returns the number of blocks that were used to
-    /// construct the `HashTree`.
+    /// Returns the number of blocks that were used to construct the `HashTree`.
     pub fn blocks(&self) -> usize {
         self.num_blocks
     }
 }
 
-impl<T> PartialEq for HashTree<T> 
+impl<T, F> PartialEq for HashTree<T, F> 
 where 
     T: Debug + Clone + PartialEq,
+    F: Fn(&[u8]) -> T,
 {
     fn eq(&self, other: &Self) -> bool {
         if let Some(root) = &self.root {
@@ -243,89 +307,3 @@ where
         false
     }
 }
-
-/*
-#[cfg(test)]
-mod test {
-    use std::fs::File;
-    use std::path::PathBuf;
-    use crate::*;
-
-    #[test]
-    fn new_big_test() {
-        let mut test_file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        test_file_path.push("examples/lorem.txt");
-        let mut file = File::open(test_file_path).unwrap();
-
-        match HashTree::new(
-            &mut file, 
-            HashStrategy::new(4096, |x| md5::compute(x))
-        ) {
-            Ok(tree) => {
-                println!("Tree has {} blocks and {} nodes", tree.blocks(), tree.nodes());
-                match tree.root() {
-                    Some(root) => {
-                        println!("ROOT HASH: {:?}", root.hash());
-                        root.print_postorder();
-                    },
-                    None => {}
-                } 
-            },
-            Err(error) => {
-                eprintln!("{}", error);
-            }
-        }
-    }
-
-    #[test]
-    fn compare_hashtrees() {
-        let mut test_file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        test_file_path.push("examples/8096.txt");
-        let mut file = File::open(test_file_path).unwrap();
-
-        let tree = match HashTree::new(
-            &mut file,
-            HashStrategy::new(4096, |x| md5::compute(x))
-        ) {
-            Ok(tree) => tree,
-            Err(error) => {
-                eprintln!("{}", error);
-                std::process::exit(1);
-            }
-        };
-
-        let tree_clone = tree.clone();
-        if tree == tree_clone {
-            println!("Trees are the same!");
-        } else {
-            println!("Trees are different!");
-        }
-    }
-
-    #[test]
-    fn new_medium_test() {
-        let mut test_file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        test_file_path.push("examples/8096.txt");
-        let mut file = File::open(test_file_path).unwrap();
-
-        match HashTree::new(
-            &mut file, 
-            HashStrategy::new(4096, |x| md5::compute(x))
-        ) {
-            Ok(tree) => {
-                println!("Tree has {} blocks and {} nodes", tree.blocks(), tree.nodes());
-                match tree.root() {
-                    Some(root) => {
-                        println!("ROOT HASH: {:?}", root.hash());
-                        root.print_postorder();
-                    },
-                    None => {}
-                } 
-            },
-            Err(error) => {
-                eprintln!("{}", error);
-            }
-        }
-    }
-}
-*/
