@@ -126,7 +126,6 @@ where
     /// ```
     /// #![allow(dead_code)]
     /// use hashtree::{HashTree, HashStrategy};
-    /// use md5::*;
     ///
     /// const BLOCK_SIZE: usize = 4096;
     ///
@@ -157,7 +156,6 @@ where
     /// ```
     /// #![allow(dead_code)]
     /// use hashtree::{HashTree, HashStrategy};
-    /// use md5::*;
     ///
     /// fn main() {
     ///     let mut data = vec![0u8, 1u8];
@@ -176,7 +174,7 @@ where
     {
         let mut buf = vec![0u8; strategy.block_size];
         let mut nodes = VecDeque::<NodePtr<T>>::new();
-        let mut block_num: usize = 0;
+        let mut block_num = 0;
 
         let mut done = false;
         while !done {
@@ -232,11 +230,18 @@ where
         return self.build(parents);
     }
 
-    /// 
+    // TODO: Implement ability to add data manually and reconstruct HashTree on the fly 
     pub fn insert<R>(&mut self, data: &mut R) 
     where 
         R: Read
     {
+        unimplemented!();
+    }
+
+    /// Recomputes the hashes and nodes of the `HashTree`. This method should be called
+    /// after you are done manually inserting data via the `insert` method.
+    pub fn update(&mut self) {
+        unimplemented!();
     }
 
     /// Returns `true` if the `HashTree` is empty and `false` otherwise.
@@ -246,7 +251,6 @@ where
     /// ```
     /// #![allow(dead_code)]
     /// use hashtree::{HashTree, HashStrategy};
-    /// use md5::*;
     /// 
     /// const BLOCK_SIZE: usize = 4096;
     ///
@@ -268,14 +272,14 @@ where
     }
 
     /// Returns the root of the `HashTree` as an `Option<&Box<HashTreeNode<T>>>`.
-    pub fn root(&self) -> Option<&NodePtr<T>> {
+    pub fn root(&self) -> Option<&HashTreeNode<T>> {
         if let Some(ref root) = self.root {
             return Some(root)
         }
         None
     }
 
-    pub fn find(&self, hash: T) -> Option<&NodePtr<T>> {
+    pub fn find(&self, hash: T) -> Option<&HashTreeNode<T>> {
         if let Some(ref root) = self.root {
             return Some(root)
         }
@@ -307,3 +311,26 @@ where
         false
     }
 }
+
+/*
+#[cfg(test)]
+mod tests {
+    use crate::{HashTree, HashStrategy};
+
+    #[test]
+    fn it_works() {
+        let data = vec![0u8; 4096];
+        if let Ok(tree) = HashTree::create(
+            &mut data.as_slice(),
+            HashStrategy::new(1024, |x| {
+                md5::compute(x)
+            })
+        ) {
+            let root = tree.root().unwrap();
+            root.print_preorder();
+            root.print_inorder();
+            root.print_postorder();
+        }
+    }
+}
+*/
