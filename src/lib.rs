@@ -1,153 +1,93 @@
 #![allow(dead_code)]
+use core::fmt;
 use std::collections::VecDeque;
 use std::io::prelude::*;
 use std::io::Result;
 use std::fmt::{Debug, Display};
-
-type NodePtr<T> = Box<HashTreeNode<T>>;
+use sha2::Digest;
 
 /// A node from the `HashTree`.
 #[derive(Debug, Clone)]
-pub struct HashTreeNode<T>
-where
-    T: Debug + Clone + PartialEq 
-{
-    hash: T,
-    left: Option<NodePtr<T>>,
-    right: Option<NodePtr<T>>,
+struct Node {
+    hash: Vec<u8>,
+    index: usize,
+    left: Option<usize>,
+    right: Option<usize>,
 }
 
-impl<T> HashTreeNode<T> 
-where
-    T: Debug + Clone + PartialEq 
-{
-    pub fn new(hash: T) -> Self {
+impl Node {
+    pub fn new(hash: Vec<u8>, index: usize) -> Self {
         Self {
             hash,
+            index,
             left: None,
             right: None,
         }
     }
 
-    pub fn hash(&self) -> &T {
+    pub fn hash(&self) -> &Vec<u8> {
         &self.hash
     }
 
-    pub fn print_inorder(&self) {
-        if let Some(ref left) = self.left {
-            left.print_inorder();
-        }
-        println!("{}", self);
-        if let Some(ref right) = self.right {
-            right.print_inorder();
-        }
+    pub fn index(&self) -> usize {
+        self.index
     }
 
-    pub fn print_preorder(&self) {
-        println!("{}", self);
-        if let Some(ref left) = self.left {
-            left.print_preorder();
-        }
-        if let Some(ref right) = self.right {
-            right.print_preorder();
-        }
+    pub fn left(&self) -> Option<usize> {
+        self.left
     }
 
-    pub fn print_postorder(&self) {
-        if let Some(ref left) = self.left {
-            left.print_postorder();
-        }
-        if let Some(ref right) = self.right {
-            right.print_postorder();
-        }
-        println!("{}", self);
+    pub fn right(&self) -> Option<usize> {
+        self.right
     }
 }
 
-impl<T> Display for HashTreeNode<T> 
-where
-    T: Debug + Clone + PartialEq
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[hash {:?}]", self.hash)
-    }
-}
-
-/// A struct that defines how the `HashTree` should partition and hash
-/// the blocks of data.
-#[derive(Debug, Clone)]
-pub struct HashStrategy<T, F> 
-where
-    T: Debug + Clone + PartialEq,
-    F: Fn(&[u8]) -> T,
-{
-    block_size: usize,
-    hash_function: F,
-}
-
-// TODO: Implement custom hash function strategy through 
-// a closure to HashStrategy::new()
-impl<T, F> HashStrategy<T, F>
-where
-    T: Debug + Clone + PartialEq,
-    F: Fn(&[u8]) -> T,
-{
-    pub fn new(block_size: usize, hash_function: F) -> Self {
-        Self {
-            block_size,
-            hash_function
-        }
+impl Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>)  -> fmt::Result {
+        write!(f, "hash: {:?}", self.hash())
     }
 }
 
 /// A Merkle-tree.
 #[derive(Debug, Clone)]
-pub struct HashTree<T, F> 
-where
-    T: Debug + Clone + PartialEq,
-    F: Fn(&[u8]) -> T,
-{
-    root: Option<NodePtr<T>>,
-    num_nodes: usize,
+pub struct HashTree {
+    nodes: VecDeque<Node>,
     num_blocks: usize,
-    strategy: HashStrategy<T, F>,
+    block_size: usize,
 }
 
-impl<T, F> HashTree<T, F> 
-where
-    T: Debug + Clone + PartialEq,
-    F: Fn(&[u8]) -> T,
-{
-    /// Constructs a new empty `HashTree<T>` with a given
-    /// `HashStrategy<T, F>`.
+// The `nodes` VecDeque contains the nodes in this order:
+// * The first `num_blocks` indices represent the actual nodes
+// of the blocks of the file that was hashed.
+// * The subsequent blocks until the last index contain the
+// node parents of the blocks
+// * The last index holds the root of the tree.
+
+impl HashTree {
+    /// Constructs a new empty `HashTree`.
     ///
     /// # Examples
     ///
     /// ```
     /// #![allow(dead_code)]
-    /// use hashtree::{HashTree, HashStrategy};
+    /// use hashtree::HashTree;
     ///
     /// const BLOCK_SIZE: usize = 4096;
     ///
     /// fn main() {
-    ///     let tree = HashTree::new(
-    ///         HashStrategy::new(BLOCK_SIZE, |data| {
-    ///             md5::compute(data)
-    ///         })
-    ///     );
+    ///     let tree = HashTree::new(BLOCK_SIZE);
     /// }
     /// ```
-    pub fn new(strategy: HashStrategy<T, F>) -> Self {
+    pub fn new(block_size: usize) -> Self {
         Self {
-            root: None,
-            num_nodes: 0,
+            nodes: VecDeque::new(), 
             num_blocks: 0,
-            strategy,
+            block_size,
         }
     }
 
-    /// Constructs a new `HashTree<T, F>` from a mutable object
-    /// that implements the `Read` trait and a `HashStrategy<T, F>`.
+    /// Constructs a new `HashTree` from a mutable object
+    /// that implements the `Read` trait.
     /// Returns an `Error` value if the function failed to read from
     /// the given object.
     ///
@@ -155,86 +95,93 @@ where
     ///
     /// ```
     /// #![allow(dead_code)]
-    /// use hashtree::{HashTree, HashStrategy};
+    /// use hashtree::HashTree;
     ///
     /// fn main() {
+    ///     let block_size = 1;
     ///     let mut data = vec![0u8, 1u8];
-    ///     let tree = HashTree::create(
-    ///         &mut data.as_slice(),
-    ///         HashStrategy::new(1, |x| md5::compute(x))
-    ///     );
+    ///     if let Ok(tree) = HashTree::create(block_size, &mut data.as_slice()) {
+    ///         assert!(tree.num_blocks() == 2);
+    ///         assert!(tree.num_nodes() == 3);
+    ///     };
     /// }
+    ///
     /// ```
-    /// The example above uses a `HashStrategy` that splits the data
-    /// into 1-byte blocks and computes their MD5 digests for the
-    /// `HashTree`.
-    pub fn create<R>(data: &mut R, strategy: HashStrategy<T, F>) -> Result<Self>
-    where 
-        R: Read,
-    {
-        let mut buf = vec![0u8; strategy.block_size];
-        let mut nodes = VecDeque::<NodePtr<T>>::new();
-        let mut block_num = 0;
+    /// The example above splits the data into 1-byte blocks and computes 
+    /// their SHA256 digests.
+    pub fn create<R: Read>(block_size: usize, data: &mut R) -> Result<Self> {
+        let mut buf = vec![];
+        let mut nodes = VecDeque::<Node>::new();
+        let mut index = 0;
 
-        let mut done = false;
-        while !done {
-            let bytes_read = data.read(&mut buf)?;
-
-            if bytes_read < strategy.block_size {
-                done = true;
+        loop {
+            let mut chunk = data.take(block_size as u64);
+            let n = chunk.read_to_end(&mut buf)?;
+            if n == 0 {
+                break;
             }
 
-            let hash = (strategy.hash_function)(&buf);
-            let node = Box::new(HashTreeNode::new(hash));
-            nodes.push_back(node);
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(&buf);
+            let hash = hasher.finalize().to_vec();
 
-            block_num += 1; 
+            let node = Node::new(hash, index);
+            nodes.push_back(node);
+            index += 1;
+
+            buf.clear();
         }
 
-        let mut hashtree = HashTree::<T, F>{
-            root: None,
-            num_nodes: nodes.len(),
-            num_blocks: block_num,
-            strategy,
+        // If there are an odd number of blocks, we need to clone the last block in order to 
+        // build the tree properly
+        if nodes.len() % 2 == 1 {
+            nodes.push_back(nodes.back().unwrap().clone());
+        }
+
+        let mut hashtree = HashTree {
+            nodes: nodes.clone(), 
+            num_blocks: index,
+            block_size,
         };
 
         hashtree.build(nodes);
         Ok(hashtree)
     }
 
-    fn build(&mut self, mut nodes: VecDeque<NodePtr<T>>) {
-        let nodes_to_process = nodes.len();
+    fn build(&mut self, mut unprocessed_nodes: VecDeque<Node>) {
+        let nodes_to_process = unprocessed_nodes.len();
         if nodes_to_process == 1 {
-            self.root = nodes.pop_front();
             return;
         }
 
-        let mut parents = VecDeque::<NodePtr<T>>::new();
+        let mut parents = VecDeque::<Node>::new();
         let mut processed = 0;
         while processed < nodes_to_process {
-            let n1 = nodes.pop_front().unwrap();
-            let n2 = nodes.pop_front().unwrap_or(n1.clone());
+            let index = self.nodes.len();
+            let n1 = unprocessed_nodes.pop_front().unwrap();
+            let n2 = unprocessed_nodes.pop_front().unwrap();
 
-            let merged_hash = format!("{:?}{:?}", n1.hash(), n2.hash());
-            let parent_hash = (self.strategy.hash_function)(merged_hash.as_bytes());
+            // Is this formatting really necessary?
+            let merged_hash = format!("{:x?}{:x?}", n1.hash(), n2.hash());
 
-            let mut parent = Box::new(HashTreeNode::new(parent_hash));
-            parent.left = Some(n1);
-            parent.right = Some(n2);
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(merged_hash);
+            let parent_hash = hasher.finalize().to_vec();
 
-            parents.push_back(parent);
+            let mut parent = Node::new(parent_hash, index);
+            parent.left = Some(n1.index());
+            parent.right = Some(n2.index());
+
+            parents.push_back(parent.clone());
+            self.nodes.push_back(parent);
             processed += 2;
-            self.num_nodes += 1;
         }
 
         return self.build(parents);
     }
 
     // TODO: Implement ability to add data manually and reconstruct HashTree on the fly 
-    pub fn insert<R>(&mut self, data: &mut R) 
-    where 
-        R: Read
-    {
+    pub fn insert<R: Read>(&mut self, data: &mut R) {
         unimplemented!();
     }
 
@@ -250,87 +197,64 @@ where
     ///
     /// ```
     /// #![allow(dead_code)]
-    /// use hashtree::{HashTree, HashStrategy};
+    /// use hashtree::HashTree;
     /// 
     /// const BLOCK_SIZE: usize = 4096;
     ///
     /// fn main() {
-    ///     let tree = HashTree::new(
-    ///         HashStrategy::new(BLOCK_SIZE, |data| {
-    ///             md5::compute(data)
-    ///         })
-    ///     );
-    ///
+    ///     let tree = HashTree::new(BLOCK_SIZE);
     ///     assert_eq!(tree.is_empty(), true);
     /// }
     /// ```
     pub fn is_empty(&self) -> bool {
-        if let Some(_) = self.root {
-            return false
+        if self.nodes.len() == 0 {
+            return true
         }
-        true
+        false
     }
 
-    /// Returns the root of the `HashTree` as an `Option<&Box<HashTreeNode<T>>>`.
-    pub fn root(&self) -> Option<&HashTreeNode<T>> {
-        if let Some(ref root) = self.root {
-            return Some(root)
-        }
-        None
-    }
-
-    pub fn find(&self, hash: T) -> Option<&HashTreeNode<T>> {
-        if let Some(ref root) = self.root {
-            return Some(root)
-        }
+    /// Returns the root of the `HashTree` as an `Option<&Box<Node<T>>>`.
+    pub fn root_hash(&self) -> Option<&Vec<u8>> {
+        if let Some(root) = self.nodes.back() {
+            return Some(root.hash())
+        };
         None
     }
 
     /// Returns the number of nodes in the `HashTree`.
-    pub fn nodes(&self) -> usize {
-        self.num_nodes
+    pub fn num_nodes(&self) -> usize {
+        self.nodes.len()
     }
 
     /// Returns the number of blocks that were used to construct the `HashTree`.
-    pub fn blocks(&self) -> usize {
+    pub fn num_blocks(&self) -> usize {
         self.num_blocks
     }
 }
 
-impl<T, F> PartialEq for HashTree<T, F> 
-where 
-    T: Debug + Clone + PartialEq,
-    F: Fn(&[u8]) -> T,
-{
-    fn eq(&self, other: &Self) -> bool {
-        if let Some(root) = &self.root {
-            if let Some(other_root) = &other.root {
-                return root.hash == other_root.hash
-            }
-        }
-        false
-    }
-}
-
-/*
 #[cfg(test)]
 mod tests {
-    use crate::{HashTree, HashStrategy};
+    use crate::HashTree;
 
     #[test]
-    fn it_works() {
-        let data = vec![0u8; 4096];
-        if let Ok(tree) = HashTree::create(
-            &mut data.as_slice(),
-            HashStrategy::new(1024, |x| {
-                md5::compute(x)
-            })
-        ) {
-            let root = tree.root().unwrap();
-            root.print_preorder();
-            root.print_inorder();
-            root.print_postorder();
+    fn one_byte_test() {
+        let block_size = 1;
+        let data = vec![0u8, 1u8];
+        if let Ok(tree) = HashTree::create(block_size, &mut data.as_slice()) {
+            println!("Tree has {} blocks with {} nodes", tree.num_blocks(), tree.num_nodes());
+            assert!(tree.num_blocks() == 2);
+            assert!(tree.num_nodes() == 3);
+        }
+
+    }
+
+    #[test]
+    fn four_k_test() {
+        let block_size = 1000;
+        let data = vec![42u8; 3000];
+        if let Ok(tree) = HashTree::create(block_size, &mut data.as_slice()) {
+            assert!(tree.num_blocks() == 3);
+            assert!(tree.num_nodes() == 7);
         }
     }
 }
-*/

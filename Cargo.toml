@@ -13,6 +13,7 @@ categories = ["data-structures"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+sha2 = "0.10.0"
 
 [dev-dependencies]
-md5 = "0.7.0"
+hex-literal = "0.3.4"
