@@ -1,22 +1,20 @@
 #![allow(dead_code)]
-use core::fmt;
 use std::collections::VecDeque;
 use std::io::prelude::*;
-use std::io::Result;
 use std::fmt::{Debug, Display};
 use sha2::Digest;
 
 /// A node from the `HashTree`.
 #[derive(Debug, Clone)]
 struct Node {
-    hash: Vec<u8>,
+    hash: String,
     index: usize,
     left: Option<usize>,
     right: Option<usize>,
 }
 
 impl Node {
-    pub fn new(hash: Vec<u8>, index: usize) -> Self {
+    pub fn new(hash: String, index: usize) -> Self {
         Self {
             hash,
             index,
@@ -25,7 +23,7 @@ impl Node {
         }
     }
 
-    pub fn hash(&self) -> &Vec<u8> {
+    pub fn hash(&self) -> &str {
         &self.hash
     }
 
@@ -39,12 +37,6 @@ impl Node {
 
     pub fn right(&self) -> Option<usize> {
         self.right
-    }
-}
-
-impl Display for Node {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>)  -> fmt::Result {
-        write!(f, "hash: {:?}", self.hash())
     }
 }
 
@@ -109,7 +101,7 @@ impl HashTree {
     /// ```
     /// The example above splits the data into 1-byte blocks and computes 
     /// their SHA256 digests.
-    pub fn create<R: Read>(block_size: usize, data: &mut R) -> Result<Self> {
+    pub fn create<R: Read>(block_size: usize, data: &mut R) -> Result<Self, Box<dyn std::error::Error>> {
         let mut buf = vec![];
         let mut nodes = VecDeque::<Node>::new();
         let mut index = 0;
@@ -123,7 +115,8 @@ impl HashTree {
 
             let mut hasher = sha2::Sha256::new();
             hasher.update(&buf);
-            let hash = hasher.finalize().to_vec();
+            let hash_as_bytes = hasher.finalize().to_vec();
+            let hash = String::from_utf8(hash_as_bytes)?;
 
             let node = Node::new(hash, index);
             nodes.push_back(node);
@@ -144,14 +137,14 @@ impl HashTree {
             block_size,
         };
 
-        hashtree.build(nodes);
+        hashtree.build(nodes)?;
         Ok(hashtree)
     }
 
-    fn build(&mut self, mut unprocessed_nodes: VecDeque<Node>) {
+    fn build(&mut self, mut unprocessed_nodes: VecDeque<Node>) -> Result<(), Box<dyn std::error::Error>> {
         let nodes_to_process = unprocessed_nodes.len();
         if nodes_to_process == 1 {
-            return;
+            return Ok(());
         }
 
         let mut parents = VecDeque::<Node>::new();
@@ -161,12 +154,12 @@ impl HashTree {
             let n1 = unprocessed_nodes.pop_front().unwrap();
             let n2 = unprocessed_nodes.pop_front().unwrap();
 
-            // Is this formatting really necessary?
             let merged_hash = format!("{:x?}{:x?}", n1.hash(), n2.hash());
 
             let mut hasher = sha2::Sha256::new();
             hasher.update(merged_hash);
-            let parent_hash = hasher.finalize().to_vec();
+            let parent_hash_as_bytes = hasher.finalize().to_vec();
+            let parent_hash = String::from_utf8(parent_hash_as_bytes)?;
 
             let mut parent = Node::new(parent_hash, index);
             parent.left = Some(n1.index());
@@ -213,8 +206,8 @@ impl HashTree {
         false
     }
 
-    /// Returns the root of the `HashTree` as an `Option<&Box<Node<T>>>`.
-    pub fn root_hash(&self) -> Option<&Vec<u8>> {
+    /// Returns the root of the `HashTree` as an `Option<&str>`.
+    pub fn root_hash(&self) -> Option<&str> {
         if let Some(root) = self.nodes.back() {
             return Some(root.hash())
         };
@@ -232,10 +225,39 @@ impl HashTree {
     }
 }
 
+impl PartialEq for HashTree {
+    fn eq(&self, other: &Self) -> bool {
+        let my_root = match self.root_hash() {
+            Some(v) => v,
+            None => {
+                match other.root_hash() {
+                    Some(_) => { return false },
+                    None => { return true }
+                };
+            }
+        };
+
+        let other_root = match other.root_hash() {
+            Some(v) => v,
+            None => { return false; }
+        };
+
+        return my_root == other_root;
+    }
+
+    fn ne(&self, other: &Self) -> bool {
+        !self.eq(other)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::HashTree;
 
+    // Quick Sanity Check
+    // SHA256 Hash for 0: 5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9
+    // SHA256 Hash for 1: 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b
+    // SHA256 Merged Hash of above: fa13bb36c022a6943f37c638126a2c88fc8d008eb5a9fe8fcde17026807feae4
     #[test]
     fn one_byte_test() {
         let block_size = 1;
@@ -244,8 +266,23 @@ mod tests {
             println!("Tree has {} blocks with {} nodes", tree.num_blocks(), tree.num_nodes());
             assert!(tree.num_blocks() == 2);
             assert!(tree.num_nodes() == 3);
+            assert!(tree.root_hash().unwrap() == "fa13bb36c022a6943f37c638126a2c88fc8d008eb5a9fe8fcde17026807feae4");
         }
+    }
 
+    #[test]
+    fn one_byte_clone_test() {
+        let block_size = 1;
+        let data = vec![0u8, 1u8];
+        if let Ok(tree) = HashTree::create(block_size, &mut data.as_slice()) {
+            println!("Tree has {} blocks with {} nodes", tree.num_blocks(), tree.num_nodes());
+            assert!(tree.num_blocks() == 2);
+            assert!(tree.num_nodes() == 3);
+            assert!(tree.root_hash().unwrap() == "fa13bb36c022a6943f37c638126a2c88fc8d008eb5a9fe8fcde17026807feae4");
+
+            let tree_clone = tree.clone();
+            assert!(tree == tree_clone);
+        }
     }
 
     #[test]
@@ -255,6 +292,7 @@ mod tests {
         if let Ok(tree) = HashTree::create(block_size, &mut data.as_slice()) {
             assert!(tree.num_blocks() == 3);
             assert!(tree.num_nodes() == 7);
+            println!("Root Hash: {}", tree.root_hash().unwrap());
         }
     }
 }
