@@ -1,13 +1,13 @@
 [package]
 name = "hashtree"
-version = "0.3.1"
+version = "0.4.1"
 authors = ["sigrvn"]
 license = "MIT"
 edition = "2018"
 description = "A Merkle Tree implementation in Rust"
 repository = "https://github.com/sigrvn/hashtree"
 
-keywords = ["merkle-tree"]
+keywords = ["hash-tree", "merkle-tree"]
 categories = ["data-structures"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
