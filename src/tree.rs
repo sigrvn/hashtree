@@ -1,12 +1,12 @@
 #![allow(dead_code)]
 use std::collections::VecDeque;
 use std::io::prelude::*;
-use sha2::Digest;
+use sha2::{Digest, Sha256};
 
 /// A node from the `HashTree`.
 #[derive(Debug, Clone)]
 struct Node {
-    pub hash: String,
+    pub hash: Vec<u8>,
     pub index: usize,
     pub left: Option<usize>,
     pub right: Option<usize>,
@@ -61,31 +61,30 @@ impl HashTree {
     ///
     /// const BLOCK_SIZE: usize = 1;
     /// let mut data = vec![0u8, 1u8];
-    /// if let Ok(tree) = HashTree::new(BLOCK_SIZE).from_data(&mut data.as_slice()) {
-    ///     assert!(tree.num_blocks() == 2);
-    ///     assert!(tree.num_nodes() == 3);
-    /// };
+    /// let tree = HashTree::new(BLOCK_SIZE).from_data(&mut data.as_slice()).unwrap();
+    /// assert!(tree.num_blocks() == 2);
+    /// assert!(tree.num_nodes() == 3);
     /// ```
     /// The example above splits the data into 1-byte blocks and computes 
     /// their SHA256 digests.
-    pub fn from_data<R: Read>(mut self, data: &mut R) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut buf = Vec::with_capacity(self.block_size);
+    pub fn from_data<R: Read>(mut self, data: &mut R) -> Result<Self, std::io::Error> {
+        let mut buf = Vec::<u8>::with_capacity(self.block_size);
         let mut index = 0;
 
         loop {
             let mut chunk = data.take(self.block_size as u64);
             if chunk.read_to_end(&mut buf)? == 0 { break; }
 
-            let mut hasher = sha2::Sha256::new();
-            hasher.update(&buf);
-            let hash = String::from_utf8(hasher.finalize().to_vec())?;
-
+            let hash = Sha256::digest(&buf).to_vec();
             let node = Node { hash, index, left: None, right: None };
             self.nodes.push_back(node);
             index += 1;
 
             buf.clear();
         }
+        // NOTE: When reconstructing the hashtree via the `insert` and `update` methods in the future, 
+        // make sure to drain the nodes from `self.num_blocks + 1` if we read an odd number of blocks
+        self.num_blocks = self.nodes.len();
 
         // If there are an odd number of blocks, we need to clone the last block in order to 
         // build the tree properly
@@ -97,33 +96,25 @@ impl HashTree {
         Ok(self)
     }
 
-    fn build(&mut self, mut unprocessed_nodes: VecDeque<Node>) -> Result<(), Box<dyn std::error::Error>> {
-        let mut nodes_to_process = match unprocessed_nodes.len() {
-            1 => return Ok(()), // We only have the root left
-            n => n,
-        };
-
+    fn build(&mut self, mut unprocessed_nodes: VecDeque<Node>) -> Result<(), std::io::Error> {
         let mut parents = VecDeque::<Node>::new();
-        while nodes_to_process > 0 {
+        while !unprocessed_nodes.is_empty() {
+            let mut n1 = unprocessed_nodes.pop_front().unwrap();
+            let mut n2 = unprocessed_nodes.pop_front().unwrap();
+
+            n1.hash.append(&mut n2.hash);
+            let merged_hash = n1.hash;
+
+            let hash = Sha256::digest(&merged_hash).to_vec();
+
             let index = self.nodes.len();
-            let n1 = unprocessed_nodes.pop_front().unwrap();
-            let n2 = unprocessed_nodes.pop_front().unwrap();
-            let merged_hash = format!("{:x?}{:x?}", n1.hash, n2.hash);
-
-            let mut hasher = sha2::Sha256::new();
-            hasher.update(merged_hash);
-            let parent_hash = String::from_utf8(hasher.finalize().to_vec())?;
-
-            let parent = Node { 
-                hash: parent_hash, 
-                index, 
-                left: Some(n1.index),
-                right: Some(n2.index)
-            };
-
+            let parent = Node { hash, index, left: Some(n1.index), right: Some(n2.index) };
             parents.push_back(parent.clone());
             self.nodes.push_back(parent);
-            nodes_to_process -= 1;
+        }
+
+        if parents.len() == 1 {
+            return Ok(());
         }
 
         self.build(parents)
@@ -151,7 +142,7 @@ impl HashTree {
     /// const BLOCK_SIZE: usize = 4096;
     ///
     /// let tree = HashTree::new(BLOCK_SIZE);
-    /// assert_eq!(tree.is_empty(), true);
+    /// assert!(tree.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
         if self.nodes.len() == 0 {
@@ -160,10 +151,10 @@ impl HashTree {
         false
     }
 
-    /// Returns the root of the `HashTree` as an `Option<&str>`.
-    pub fn root_hash(&self) -> Option<&str> {
+    /// Returns the root hash of the `HashTree` as an `Option<String>`.
+    pub fn root_hash(&self) -> Option<String> {
         if let Some(root) = self.nodes.back() {
-            return Some(&root.hash)
+            return Some(hex::encode(&root.hash))
         };
         None
     }
